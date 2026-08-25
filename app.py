@@ -3,7 +3,9 @@
 This file renders and holds session state. All logic lives in core/.
 """
 
+import html
 import os
+from pathlib import Path
 
 import duckdb
 import pandas as pd
@@ -31,17 +33,20 @@ EXAMPLES = [
     "How many customers are in each city?",
 ]
 
-# The chat input is docked to the bottom of the viewport, so the page needs
-# room underneath it or the newest answer renders behind the input bar.
-st.markdown(
-    """
-    <style>
-      .block-container { padding-bottom: 7rem; }
-      div[data-testid="stMetricValue"] { font-size: 2.1rem; }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
+# Ledger-terminal palette: gold is reserved for figures, everything else stays
+# quiet. Charts are themed to match so they do not look bolted on.
+CHART_INK = "#93A0BC"
+CHART_GRID = "#222D4A"
+CHART_SERIES = ["#E5B567", "#5FBF9B", "#7FA6E8", "#E0785C", "#B58BD6"]
+
+
+def load_stylesheet() -> None:
+    css = Path(__file__).parent / "assets" / "style.css"
+    if css.exists():
+        st.markdown(f"<style>{css.read_text(encoding='utf-8')}</style>", unsafe_allow_html=True)
+
+
+load_stylesheet()
 
 
 def get_connection() -> duckdb.DuckDBPyConnection:
@@ -91,12 +96,29 @@ def render_result(frame: pd.DataFrame) -> None:
 
 
 def render_chart(frame, spec) -> None:
+    common = dict(x=spec.x, y=spec.y, color_discrete_sequence=CHART_SERIES)
     figure = (
-        px.bar(frame, x=spec.x, y=spec.y)
+        px.bar(frame, **common)
         if spec.kind == "bar"
-        else px.line(frame, x=spec.x, y=spec.y, markers=True)
+        else px.line(frame, markers=True, **common)
     )
-    figure.update_layout(margin=dict(l=0, r=0, t=10, b=0), height=340)
+    figure.update_layout(
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        font=dict(family="Public Sans, sans-serif", color=CHART_INK, size=12),
+        margin=dict(l=0, r=0, t=14, b=0),
+        height=330,
+        hoverlabel=dict(
+            bgcolor="#131A2E", bordercolor="#222D4A", font_family="JetBrains Mono, monospace"
+        ),
+    )
+    axis = dict(gridcolor=CHART_GRID, zeroline=False, linecolor=CHART_GRID, title=None)
+    figure.update_xaxes(**axis)
+    figure.update_yaxes(**axis)
+    if spec.kind == "line":
+        figure.update_traces(line=dict(width=2), marker=dict(size=5))
+    else:
+        figure.update_traces(marker_line_width=0)
     st.plotly_chart(figure, use_container_width=True)
 
 
@@ -121,11 +143,13 @@ def render_run_details(record) -> None:
 
 def render_exchange(entry, number: int, total: int) -> None:
     record = entry["record"]
-    is_latest = number == total
+    live = " &middot; <span class='live'>latest</span>" if number == total else ""
 
-    heading = f"#{number}" + ("  ·  latest" if is_latest else "")
-    st.caption(heading)
-    st.markdown(f"### {entry['question']}")
+    st.markdown(
+        f"<p class='ts-index'>Q{number:02d}{live}</p>"
+        f"<p class='ts-question'>{html.escape(entry['question'])}</p>",
+        unsafe_allow_html=True,
+    )
 
     if record.status == "refused":
         st.warning(entry["headline"])
@@ -134,7 +158,12 @@ def render_exchange(entry, number: int, total: int) -> None:
     elif record.status == "empty":
         st.info(entry["headline"])
     else:
-        st.caption(entry["headline"])
+        st.markdown(
+            f"<p class='ts-meta'><b>{record.row_count:,}</b> row(s) &middot; "
+            f"<b>{record.total_ms:,}</b> ms &middot; "
+            f"{len(record.attempts)} attempt(s)</p>",
+            unsafe_allow_html=True,
+        )
 
     render_result(entry["frame"])
 
@@ -210,7 +239,18 @@ if st.session_state.get("tables"):
 
 # ---------------------------------------------------------------- main
 
+MASTHEAD = """
+<div class="ts-mast">
+  <div>
+    <p class="ts-word">Table<em>sense</em></p>
+    <p class="ts-thesis">The model writes the query &middot; the database does the arithmetic</p>
+  </div>
+  <span class="ts-badge">{badge}</span>
+</div>
+"""
+
 if not st.session_state.get("tables"):
+    st.markdown(MASTHEAD.format(badge="awaiting data"), unsafe_allow_html=True)
     st.title("Ask your spreadsheets a question")
     st.markdown(
         "Upload two or more related files in the sidebar, then ask in plain English.\n\n"
@@ -220,6 +260,13 @@ if not st.session_state.get("tables"):
     )
     st.info("Sample files to try are in `data/samples/` in the repo.")
     st.stop()
+
+_tables = st.session_state.get("tables", [])
+_rows = sum(t.rows for t in _tables)
+st.markdown(
+    MASTHEAD.format(badge=f"{len(_tables)} tables &middot; {_rows:,} rows"),
+    unsafe_allow_html=True,
+)
 
 with st.expander("What was loaded", expanded=not st.session_state.get("history")):
     for profile in st.session_state.profiles:
@@ -253,7 +300,7 @@ with st.expander("What was loaded", expanded=not st.session_state.get("history")
 pending: str | None = None
 
 if not st.session_state.get("history"):
-    st.markdown("##### Try one of these")
+    st.markdown("<p class='ts-eyebrow'>Try one of these</p>", unsafe_allow_html=True)
     for row_start in (0, 2):
         left, right = st.columns(2)
         for column, example in zip((left, right), EXAMPLES[row_start : row_start + 2]):
