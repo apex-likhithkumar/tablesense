@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tablesense"
+version = "0.1.0"
+description = "Ask analytical questions of your spreadsheets in plain English"
+requires-python = ">=3.11"
+dependencies = [
+    "streamlit>=1.38",
+    "duckdb>=1.1",
+    "pandas>=2.2",
+    "openpyxl>=3.1",
+    "sqlglot>=25,<27",
+    "pydantic>=2.8",
+    "pydantic-settings>=2.4",
+    "openai>=1.40",
+    "plotly>=5.24",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.3"]
+
+[tool.setuptools]
+packages = ["core"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
