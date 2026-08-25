@@ -178,6 +178,7 @@
            ROUND(SUM(quantity * unit_price), 2) AS revenue
     FROM orders GROUP BY 1 ORDER BY 1
   chart: line
+  ordered: true
 
 - id: trend_monthly_orders
   question: "How many orders were placed each month?"
@@ -185,6 +186,7 @@
     SELECT DATE_TRUNC('month', order_date) AS month, COUNT(*) AS n
     FROM orders GROUP BY 1 ORDER BY 1
   chart: line
+  ordered: true
 
 - id: trend_yearly_revenue
   question: "What is the total revenue for each year?"
@@ -192,6 +194,7 @@
     SELECT EXTRACT(year FROM order_date) AS yr,
            ROUND(SUM(quantity * unit_price), 2) AS revenue
     FROM orders GROUP BY 1 ORDER BY 1
+  ordered: true
 
 - id: trend_returns_monthly
   question: "How many returns happened each month?"
@@ -199,6 +202,7 @@
     SELECT DATE_TRUNC('month', return_date) AS month, COUNT(*) AS n
     FROM returns GROUP BY 1 ORDER BY 1
   chart: line
+  ordered: true
 
 # ---- top-N ----
 - id: top5_orders_by_value
@@ -206,12 +210,14 @@
   oracle_sql: |
     SELECT order_id, ROUND(quantity * unit_price, 2) AS value
     FROM orders ORDER BY value DESC LIMIT 5
+  ordered: true
 
 - id: top3_products_by_revenue
   question: "Which three products generated the most revenue? Show product id and revenue."
   oracle_sql: |
     SELECT o.product_id, ROUND(SUM(o.quantity * o.unit_price), 2) AS revenue
     FROM orders o GROUP BY o.product_id ORDER BY revenue DESC LIMIT 3
+  ordered: true
 
 # ---- refusals ----
 - id: refuse_ceo

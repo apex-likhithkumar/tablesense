@@ -5,9 +5,18 @@ only for the query that produces one.
 """
 
 import json
+import random
+import time
 from typing import Literal
 
-from openai import OpenAI
+from openai import (
+    APIConnectionError,
+    APIStatusError,
+    APITimeoutError,
+    InternalServerError,
+    OpenAI,
+    RateLimitError,
+)
 from pydantic import BaseModel, ValidationError, field_validator
 
 from core.config import settings
@@ -30,6 +39,26 @@ class QueryPlan(BaseModel):
 
 class PlannerError(RuntimeError):
     """The model could not be reached, or returned something unusable."""
+
+
+# Transient by nature: a hosted model under load returns these, and the right
+# response is to wait, not to fail the user's question.
+RETRYABLE = (RateLimitError, APIConnectionError, APITimeoutError, InternalServerError)
+MAX_TRIES = 4
+BASE_BACKOFF_SECONDS = 2.0
+
+
+def _is_transient(exc: Exception) -> bool:
+    """Throttling and server faults are worth waiting out; bad requests are not.
+
+    Hosted providers do not always map 429 to RateLimitError, so the status code
+    is checked directly rather than trusting the exception class alone.
+    """
+    if isinstance(exc, RETRYABLE):
+        return True
+    if isinstance(exc, APIStatusError):
+        return exc.status_code == 429 or exc.status_code >= 500
+    return False
 
 
 SYSTEM_PROMPT = """You translate questions about tabular data into a single DuckDB SQL SELECT statement.
@@ -80,21 +109,38 @@ def build_user_message(question: str, schema_text: str, repair_error: str | None
 def plan(question: str, schema_text: str, repair_error: str | None = None) -> QueryPlan:
     client = _client()
 
-    try:
-        response = client.chat.completions.create(
-            model=settings.model_name,
-            temperature=settings.llm_temperature,
-            response_format={"type": "json_object"},
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {
-                    "role": "user",
-                    "content": build_user_message(question, schema_text, repair_error),
-                },
-            ],
-        )
-    except Exception as exc:  # noqa: BLE001 - network/auth/rate-limit all surface the same way
-        raise PlannerError(f"Could not reach the model: {exc}") from exc
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": build_user_message(question, schema_text, repair_error)},
+    ]
+
+    last_error: Exception | None = None
+    response = None
+
+    for attempt in range(MAX_TRIES):
+        try:
+            response = client.chat.completions.create(
+                model=settings.model_name,
+                temperature=settings.llm_temperature,
+                response_format={"type": "json_object"},
+                messages=messages,
+            )
+            break
+        except Exception as exc:  # noqa: BLE001 - re-raised below unless transient
+            if not _is_transient(exc):
+                raise PlannerError(f"Could not reach the model: {exc}") from exc
+            last_error = exc
+            if attempt == MAX_TRIES - 1:
+                break
+            # Exponential backoff with jitter, so a burst of questions does not
+            # retry in lockstep and re-trigger the same rate limit.
+            delay = BASE_BACKOFF_SECONDS * (2**attempt) + random.uniform(0, 1)
+            time.sleep(delay)
+
+    if response is None:
+        raise PlannerError(
+            f"Could not reach the model after {MAX_TRIES} attempts: {last_error}"
+        ) from last_error
 
     raw = response.choices[0].message.content or ""
 

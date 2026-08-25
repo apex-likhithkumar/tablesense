@@ -5,3 +5,5 @@ __pycache__/
 .streamlit/secrets.toml
 .pytest_cache/
 *.egg-info/
+evals_full.txt
+evals_rerun.txt
