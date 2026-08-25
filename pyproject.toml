@@ -28,3 +28,10 @@ packages = ["core"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+# Streamlit Community Cloud detects pyproject.toml and runs Poetry, which then
+# tries to install this repo as a package named "tablesense". The importable
+# package is "core", so that step fails. This tells Poetry to manage
+# dependencies only. setuptools ignores the section.
+[tool.poetry]
+package-mode = false
