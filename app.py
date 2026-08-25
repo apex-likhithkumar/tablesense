@@ -3,7 +3,6 @@
 This file renders and holds session state. All logic lives in core/.
 """
 
-import html
 import os
 from pathlib import Path
 
@@ -143,13 +142,9 @@ def render_run_details(record) -> None:
 
 def render_exchange(entry, number: int, total: int) -> None:
     record = entry["record"]
-    live = " &middot; <span class='live'>latest</span>" if number == total else ""
 
-    st.markdown(
-        f"<p class='ts-index'>Q{number:02d}{live}</p>"
-        f"<p class='ts-question'>{html.escape(entry['question'])}</p>",
-        unsafe_allow_html=True,
-    )
+    st.caption(f"Q{number}" + ("  ·  latest" if number == total else ""))
+    st.subheader(entry["question"], anchor=False)
 
     if record.status == "refused":
         st.warning(entry["headline"])
@@ -158,12 +153,7 @@ def render_exchange(entry, number: int, total: int) -> None:
     elif record.status == "empty":
         st.info(entry["headline"])
     else:
-        st.markdown(
-            f"<p class='ts-meta'><b>{record.row_count:,}</b> row(s) &middot; "
-            f"<b>{record.total_ms:,}</b> ms &middot; "
-            f"{len(record.attempts)} attempt(s)</p>",
-            unsafe_allow_html=True,
-        )
+        st.caption(entry["headline"])
 
     render_result(entry["frame"])
 
@@ -239,18 +229,7 @@ if st.session_state.get("tables"):
 
 # ---------------------------------------------------------------- main
 
-MASTHEAD = """
-<div class="ts-mast">
-  <div>
-    <p class="ts-word">Table<em>sense</em></p>
-    <p class="ts-thesis">The model writes the query &middot; the database does the arithmetic</p>
-  </div>
-  <span class="ts-badge">{badge}</span>
-</div>
-"""
-
 if not st.session_state.get("tables"):
-    st.markdown(MASTHEAD.format(badge="awaiting data"), unsafe_allow_html=True)
     st.title("Ask your spreadsheets a question")
     st.markdown(
         "Upload two or more related files in the sidebar, then ask in plain English.\n\n"
@@ -261,11 +240,10 @@ if not st.session_state.get("tables"):
     st.info("Sample files to try are in `data/samples/` in the repo.")
     st.stop()
 
-_tables = st.session_state.get("tables", [])
-_rows = sum(t.rows for t in _tables)
-st.markdown(
-    MASTHEAD.format(badge=f"{len(_tables)} tables &middot; {_rows:,} rows"),
-    unsafe_allow_html=True,
+tables = st.session_state.get("tables", [])
+st.caption(
+    f"{len(tables)} tables · {sum(t.rows for t in tables):,} rows · "
+    "the model writes the query, the database does the arithmetic"
 )
 
 with st.expander("What was loaded", expanded=not st.session_state.get("history")):
@@ -300,7 +278,7 @@ with st.expander("What was loaded", expanded=not st.session_state.get("history")
 pending: str | None = None
 
 if not st.session_state.get("history"):
-    st.markdown("<p class='ts-eyebrow'>Try one of these</p>", unsafe_allow_html=True)
+    st.caption("Try one of these")
     for row_start in (0, 2):
         left, right = st.columns(2)
         for column, example in zip((left, right), EXAMPLES[row_start : row_start + 2]):
