@@ -8,6 +8,7 @@ Usage:  python evals/run_evals.py
 
 import io
 import sys
+import time
 from pathlib import Path
 
 import duckdb
@@ -126,6 +127,8 @@ def main() -> int:
     passed = 0
 
     for index, case in enumerate(cases, start=1):
+        if index > 1 and settings.eval_delay_seconds:
+            time.sleep(settings.eval_delay_seconds)
         answer = answer_question(con, case["question"], schema_text, tables)
         record = answer.record
 

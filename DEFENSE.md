@@ -66,19 +66,32 @@ That is schema RAG and it is a real technique. At 4 files it is cost with no ben
 
 ## 4. Model choice
 
-**Chose:** `qwen/qwen3.6-27b` on Groq. Open weights, Apache 2.0.
+**Chose:** `openai/gpt-oss-120b` on Groq. Open weights, Apache 2.0.
 
-**Why:** the brief requires open-source models. I benchmarked it against
-`openai/gpt-oss-120b` on three representative questions — a three-table join, a time-series
-aggregation, and an unanswerable one. Both produced correct SQL and both refused correctly.
-Qwen won on:
-- **Latency**: ~3s consistently versus ~17s for gpt-oss on the multi-join question
-- **Chart hints**: gpt-oss returned `chart: none` for a clearly categorical result
-- **Refusal quality**: Qwen named the table it would have needed; gpt-oss gave a terse reason
+**I got this wrong first, and the correction is the interesting part.** My initial benchmark
+of three questions showed gpt-oss at ~17s versus Qwen at ~3s, so I picked Qwen. That
+measurement caught gpt-oss on a cold start, and I generalised from three samples.
 
-There is also a presentation reason: a reviewer scanning the repo and seeing `openai/` in
-the model id could reasonably mistake it for a proprietary model, which is exactly the
-constraint being tested.
+Running the full 43-question set exhausted Groq's 200,000 tokens-per-day cap on Qwen. The
+error message is what exposed the real cause: **Qwen3.6 is a reasoning model**, spending
+~4,500 tokens per call on thinking blocks to produce ~150 tokens of SQL. Re-benchmarking
+properly:
+
+| Model | Latency | Tokens per call |
+|---|---|---|
+| qwen/qwen3.6-27b | 15-20s | ~4,500 |
+| openai/gpt-oss-20b | 558ms | 621 |
+| openai/gpt-oss-120b | 644ms | 632 |
+
+~25x faster, ~7x cheaper, same SQL. Translating a question into SQL does not benefit from a
+visible chain of thought - it is a mechanical transformation, not a reasoning problem.
+
+**On the name:** `openai/` is the publisher, not a hosted proprietary model. gpt-oss weights
+are published under Apache 2.0 and run locally under Ollama. If the panel raises it, that is
+the answer, and the README states it up front rather than hoping nobody looks.
+
+**The lesson worth stating:** a three-sample benchmark is an anecdote. The number that
+mattered was tokens per call, and I did not look at it until a rate limit forced me to.
 
 **Provider is swappable in one line.** `groq_base_url` and `model_name` are config. Ollama,
 Together and Fireworks all speak the same OpenAI-compatible protocol.
@@ -226,7 +239,11 @@ Stated before the panel finds them:
    42 questions, not every question.
 5. **Free-tier latency is variable** — usually 2–4s, occasionally 20s+ under load.
 6. **Excel files with multiple sheets** load only the first sheet.
-7. **No aggregate-correctness check.** If the model writes `AVG` where the user meant a
+7. **The model occasionally refuses a question it can answer** - roughly 1 run in 50,
+   claiming a value is absent when it is present. Hosted inference is not fully
+   deterministic even at `temperature=0`. A false refusal is the failure mode I would pick
+   if forced to choose, but it is still a failure.
+8. **No aggregate-correctness check.** If the model writes `AVG` where the user meant a
    weighted average, nothing catches it.
 
 ---

@@ -12,9 +12,12 @@ class Settings(BaseSettings):
     # Swapping to Ollama or Together is a base_url + model_name change, nothing else.
     groq_api_key: str = ""
     groq_base_url: str = "https://api.groq.com/openai/v1"
-    # Open-weight (Apache 2.0). Chosen over openai/gpt-oss-120b after benchmarking:
-    # comparable SQL quality, ~5x faster on multi-join questions, better chart hints.
-    model_name: str = "qwen/qwen3.6-27b"
+    # Open-weight, Apache 2.0 - the weights are published and this runs locally
+    # under Ollama. "openai/" is the publisher, not a hosted proprietary model.
+    # Chosen over qwen/qwen3.6-27b after benchmarking: ~25x lower latency and
+    # ~7x fewer tokens per question, because Qwen spends most of a call on
+    # reasoning tokens that translating a question into SQL does not need.
+    model_name: str = "openai/gpt-oss-120b"
 
     # Caps. Every one of these exists because an unbounded version of it
     # is a way for a single question to take down the app.
@@ -29,6 +32,15 @@ class Settings(BaseSettings):
 
     llm_temperature: float = 0.0  # SQL generation should be reproducible
     llm_timeout_seconds: int = 30
+
+    # Blank means the parameter is not sent at all. Providers disagree on the
+    # accepted values ("none" vs "low"/"medium"/"high"), and the default is
+    # already fast for gpt-oss. The planner drops it automatically if rejected.
+    reasoning_effort: str = ""
+
+    # Serial pacing between questions in the eval harness. The free tier is
+    # burst-limited per minute, and 43 back-to-back calls exhaust it.
+    eval_delay_seconds: float = 0.5
 
 
 settings = Settings()

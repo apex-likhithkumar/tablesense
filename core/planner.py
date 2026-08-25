@@ -11,6 +11,7 @@ from typing import Literal
 
 from openai import (
     APIConnectionError,
+    BadRequestError,
     APIStatusError,
     APITimeoutError,
     InternalServerError,
@@ -46,6 +47,10 @@ class PlannerError(RuntimeError):
 RETRYABLE = (RateLimitError, APIConnectionError, APITimeoutError, InternalServerError)
 MAX_TRIES = 4
 BASE_BACKOFF_SECONDS = 2.0
+
+# Flipped off permanently for the process if the provider rejects the parameter,
+# so swapping to a model that has no reasoning mode still works.
+_reasoning_supported = True
 
 
 def _is_transient(exc: Exception) -> bool:
@@ -114,18 +119,29 @@ def plan(question: str, schema_text: str, repair_error: str | None = None) -> Qu
         {"role": "user", "content": build_user_message(question, schema_text, repair_error)},
     ]
 
+    global _reasoning_supported
+
     last_error: Exception | None = None
     response = None
 
     for attempt in range(MAX_TRIES):
+        extra = {}
+        if settings.reasoning_effort and _reasoning_supported:
+            extra["reasoning_effort"] = settings.reasoning_effort
         try:
             response = client.chat.completions.create(
                 model=settings.model_name,
                 temperature=settings.llm_temperature,
                 response_format={"type": "json_object"},
                 messages=messages,
+                **extra,
             )
             break
+        except BadRequestError as exc:
+            if extra and "reasoning_effort" in str(exc):
+                _reasoning_supported = False
+                continue
+            raise PlannerError(f"Could not reach the model: {exc}") from exc
         except Exception as exc:  # noqa: BLE001 - re-raised below unless transient
             if not _is_transient(exc):
                 raise PlannerError(f"Could not reach the model: {exc}") from exc

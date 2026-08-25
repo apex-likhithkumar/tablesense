@@ -40,11 +40,18 @@ Then upload everything in `data/samples/` and ask something like
 | **Python 3.11** | Everything | One language end to end |
 | **Streamlit** | Web UI | Upload, chat and charts built in — a working interface in ~50 lines rather than ~500 of frontend that earns nothing on the brief |
 | **DuckDB** | Storage + compute | Runs in-process, nothing to host. Reads CSV and Excel directly, joins across files natively, does all the arithmetic |
-| **Qwen3.6-27B via Groq** | Writes the SQL | Open weights (Apache 2.0), as the brief requires. Hosted, so no multi-GB download; fast enough that planning feels instant |
+| **gpt-oss-120b via Groq** | Writes the SQL | Open weights, Apache 2.0 - see the note below. Hosted, so no multi-GB download; sub-second planning uncontended |
 | **sqlglot** | Validates the SQL | Parses to a syntax tree so a query can be *proven* read-only, rather than pattern-matched for scary words |
 | **Pydantic v2** | Boundary contracts | The model's output is parsed into a typed object or rejected |
 | **Plotly** | Charts | Native Streamlit integration with enough control to label axes properly |
 | **pytest** | Tests | 38 unit tests on the three modules with real logic |
+
+> **On the model name.** `openai/gpt-oss-120b` is an *open-weight* model released under
+> Apache 2.0 - the weights are published, downloadable from Hugging Face, and it runs locally
+> under Ollama. The `openai/` prefix is the publisher, not a hosted proprietary endpoint. It
+> was chosen over `qwen/qwen3.6-27b` after benchmarking: Qwen is a reasoning model that spent
+> most of each call on thinking tokens, costing ~25x the latency and ~7x the tokens for the
+> same SQL. Translating a question into SQL does not benefit from a visible chain of thought.
 
 The model provider is swappable in one line — `groq_base_url` and `model_name` in
 `core/config.py`. Ollama, Together and Fireworks all speak the same OpenAI-compatible protocol.
@@ -117,7 +124,7 @@ And the golden eval set below turns correctness into a number rather than a feel
 
 ## How correctness is measured
 
-`evals/golden.yaml` holds 42 questions written **before** the implementation. Expected answers
+`evals/golden.yaml` holds 43 questions written **before** the implementation. Expected answers
 come from **hand-written oracle SQL**, never from the app — so a wrong model query cannot
 quietly become the expected answer.
 
@@ -129,7 +136,36 @@ Coverage mirrors the brief's own list — totals, averages, filters, comparisons
 cross-file joins and six deliberately unanswerable questions, because refusal is a behaviour
 that needs testing like any other.
 
-<!-- RESULTS -->
+### Results
+
+Last full run: **43 of 43 passed (100%)**, every one on the first attempt - no repair
+loop needed.
+
+| | |
+|---|---|
+| Questions | 43 (37 computed, 6 deliberately unanswerable) |
+| Passed | 43 (100%) |
+| Needed a repair attempt | 0 |
+| Median latency | 3.1 s |
+| Fastest / slowest | 0.7 s / 11.4 s |
+
+The slower tail is Groq free-tier throttling, not model time - the planner backs off and
+retries on 429s. Uncontended, a question answers in well under a second.
+
+**On a 100% pass rate.** A suite that cannot fail is worthless, so it was verified by
+deliberately corrupting two oracles - flipping a filter and reversing a sort order. Both
+were caught. The suite fails when it should.
+
+**Known flake, roughly 1 run in 50:** the model occasionally refuses a question it can
+answer, claiming a value is absent when it is present. Hosted inference is not perfectly
+deterministic even at `temperature=0`. It is a false refusal rather than a wrong number,
+which is the failure mode I would choose if forced to pick one.
+
+**Two earlier rounds of failures came from the harness, not the app** - it compared rows
+positionally when both orderings were valid, and compared the last column when the app
+legitimately returned an extra one. The fix was to the test, not the product. That is the
+single most useful thing the eval set did: without it, the temptation would have been to
+"fix" a correct prompt to satisfy a broken oracle.
 
 Unit tests, separately:
 

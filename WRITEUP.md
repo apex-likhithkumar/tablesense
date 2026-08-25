@@ -39,17 +39,22 @@ equivalent; and joins don't survive retrieval. RAG would earn its place for a da
 or as schema RAG beyond ~50 tables where schemas stop fitting in context. At four files it's
 cost with no benefit.
 
-**An open-weight model, benchmarked rather than assumed.** Qwen3.6-27B (Apache 2.0) on Groq,
-chosen over gpt-oss-120b after comparing both on a three-table join, a time-series
-aggregation, and an unanswerable question — comparable accuracy, roughly 5× lower latency,
-better chart hints. Provider is one config line; Ollama and Together speak the same protocol.
+**An open-weight model, benchmarked properly the second time.** gpt-oss-120b (Apache 2.0)
+on Groq. My first benchmark of three questions pointed at Qwen3.6; running the full eval set
+exhausted a daily token cap and the error revealed why - Qwen is a reasoning model burning
+~4,500 tokens of thinking to emit ~150 tokens of SQL. gpt-oss produces the same SQL ~25x
+faster on ~7x fewer tokens. A three-sample benchmark is an anecdote; the number that mattered
+was tokens per call, and I did not look at it until a rate limit forced me to.
 
 **Correctness is measured, not asserted.** 43 questions written before the implementation,
-with expected answers from hand-written oracle SQL — so a wrong model query can't quietly
-become the expected answer. Two rounds of failures came from my *harness*, not the app: it
-compared rows positionally when both orderings were valid, and compared the last column when
-the app legitimately returned an extra one. Fixing the test rather than the product was the
-right call, and finding that out is exactly why the eval set exists.
+with expected answers from hand-written oracle SQL - so a wrong model query can't quietly
+become the expected answer. **Current: 43/43, no repair attempts needed, median 3.1s.** The
+suite was verified by deliberately corrupting two oracles to confirm it still fails when it
+should. Two earlier rounds of failures came from my *harness*, not the app: it compared rows
+positionally when both orderings were valid, and compared the last column when the app
+legitimately returned an extra one. Fixing the test rather than the product was the right
+call - without the eval set, the temptation would have been to "fix" a correct prompt to
+satisfy a broken oracle.
 
 ## Known limitations
 
