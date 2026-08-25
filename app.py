@@ -9,7 +9,7 @@ import duckdb
 import plotly.express as px
 import streamlit as st
 
-st.set_page_config(page_title="Tablesense", page_icon="calculator", layout="wide")
+st.set_page_config(page_title="Tablesense", page_icon="🧮", layout="wide")
 
 # Streamlit Cloud injects secrets rather than a .env file.
 try:
@@ -163,7 +163,7 @@ if not st.session_state.get("tables"):
         "**The model writes the query; the database does the arithmetic** - "
         "so every number comes from your files, not from a language model."
     )
-    st.info("Sample files to try are in `data/samples/` in the repo.", icon="i")
+    st.info("Sample files to try are in `data/samples/` in the repo.")
     st.stop()
 
 with st.expander("What was loaded", expanded=not st.session_state.get("history")):

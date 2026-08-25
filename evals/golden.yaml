@@ -1,0 +1,239 @@
+# Truth comes from hand-written SQL, not from the app.
+# `oracle_sql` is executed directly; the app's answer must match it.
+
+# ---- single table: totals, counts, averages ----
+- id: total_revenue
+  question: "What is the total revenue across all orders?"
+  oracle_sql: "SELECT ROUND(SUM(quantity * unit_price), 2) AS v FROM orders"
+
+- id: order_count
+  question: "How many orders are there in total?"
+  oracle_sql: "SELECT COUNT(*) AS v FROM orders"
+
+- id: avg_unit_price
+  question: "What is the average unit price?"
+  oracle_sql: "SELECT ROUND(AVG(unit_price), 2) AS v FROM orders"
+
+- id: customer_count
+  question: "How many customers are there?"
+  oracle_sql: "SELECT COUNT(*) AS v FROM customers"
+
+- id: product_count
+  question: "How many products are in the catalogue?"
+  oracle_sql: "SELECT COUNT(*) AS v FROM products"
+
+- id: total_quantity
+  question: "What is the total quantity sold?"
+  oracle_sql: "SELECT SUM(quantity) AS v FROM orders"
+
+- id: max_unit_price
+  question: "What is the highest unit price of any order?"
+  oracle_sql: "SELECT ROUND(MAX(unit_price), 2) AS v FROM orders"
+
+- id: min_unit_price
+  question: "What is the lowest unit price of any order?"
+  oracle_sql: "SELECT ROUND(MIN(unit_price), 2) AS v FROM orders"
+
+# ---- filters ----
+- id: orders_over_5000
+  question: "How many orders had a unit price above 5000?"
+  oracle_sql: "SELECT COUNT(*) AS v FROM orders WHERE unit_price > 5000"
+
+- id: vip_customers
+  question: "How many customers are in the VIP segment?"
+  oracle_sql: "SELECT COUNT(*) AS v FROM customers WHERE segment = 'VIP'"
+
+- id: north_revenue
+  question: "What is the total revenue from the North region?"
+  oracle_sql: "SELECT ROUND(SUM(quantity * unit_price), 2) AS v FROM orders WHERE region = 'North'"
+
+- id: hyderabad_customers
+  question: "How many customers are based in Hyderabad?"
+  oracle_sql: "SELECT COUNT(*) AS v FROM customers WHERE city = 'Hyderabad'"
+
+- id: multi_filter_orders
+  question: "How many orders in the West region had a quantity of at least 3?"
+  oracle_sql: "SELECT COUNT(*) AS v FROM orders WHERE region = 'West' AND quantity >= 3"
+
+- id: orders_in_2026
+  question: "How many orders were placed in 2026?"
+  oracle_sql: "SELECT COUNT(*) AS v FROM orders WHERE EXTRACT(year FROM order_date) = 2026"
+
+# ---- group by, comparisons ----
+- id: revenue_by_region
+  question: "What is the total revenue by region?"
+  oracle_sql: |
+    SELECT region, ROUND(SUM(quantity * unit_price), 2) AS revenue
+    FROM orders GROUP BY region ORDER BY region
+  chart: bar
+
+- id: top_region
+  question: "Which region has the highest total revenue?"
+  oracle_sql: |
+    SELECT region FROM orders
+    GROUP BY region ORDER BY SUM(quantity * unit_price) DESC LIMIT 1
+
+- id: orders_per_region
+  question: "How many orders were placed in each region?"
+  oracle_sql: "SELECT region, COUNT(*) AS n FROM orders GROUP BY region ORDER BY region"
+  chart: bar
+
+- id: customers_per_segment
+  question: "How many customers are in each segment?"
+  oracle_sql: "SELECT segment, COUNT(*) AS n FROM customers GROUP BY segment ORDER BY segment"
+  chart: bar
+
+- id: avg_price_by_region
+  question: "What is the average unit price in each region?"
+  oracle_sql: |
+    SELECT region, ROUND(AVG(unit_price), 2) AS avg_price
+    FROM orders GROUP BY region ORDER BY region
+  chart: bar
+
+- id: customers_per_city
+  question: "How many customers are in each city?"
+  oracle_sql: "SELECT city, COUNT(*) AS n FROM customers GROUP BY city ORDER BY city"
+  chart: bar
+
+# ---- cross-file joins ----
+- id: cross_revenue_by_category
+  question: "What is the total revenue by product category?"
+  oracle_sql: |
+    SELECT p.category, ROUND(SUM(o.quantity * o.unit_price), 2) AS revenue
+    FROM orders o JOIN products p ON p.product_id = o.product_id
+    GROUP BY p.category ORDER BY p.category
+  chart: bar
+
+- id: cross_revenue_by_segment
+  question: "How much revenue comes from each customer segment?"
+  oracle_sql: |
+    SELECT c.segment, ROUND(SUM(o.quantity * o.unit_price), 2) AS revenue
+    FROM orders o JOIN customers c ON c.customer_id = o.customer_id
+    GROUP BY c.segment ORDER BY c.segment
+  chart: bar
+
+- id: cross_top_city
+  question: "Which city generated the most revenue?"
+  oracle_sql: |
+    SELECT c.city FROM orders o JOIN customers c ON c.customer_id = o.customer_id
+    GROUP BY c.city ORDER BY SUM(o.quantity * o.unit_price) DESC LIMIT 1
+
+- id: cross_top_category_repeat
+  question: "Which product category earned the most revenue from repeat customers?"
+  oracle_sql: |
+    SELECT p.category
+    FROM orders o
+    JOIN customers c ON c.customer_id = o.customer_id
+    JOIN products p ON p.product_id = o.product_id
+    WHERE c.segment = 'Repeat'
+    GROUP BY p.category ORDER BY SUM(o.quantity * o.unit_price) DESC LIMIT 1
+
+- id: cross_returned_orders
+  question: "How many orders were returned?"
+  oracle_sql: "SELECT COUNT(DISTINCT order_id) AS v FROM returns"
+
+- id: cross_return_reason_top
+  question: "What is the most common return reason?"
+  oracle_sql: "SELECT reason FROM returns GROUP BY reason ORDER BY COUNT(*) DESC LIMIT 1"
+
+- id: cross_returns_by_reason
+  question: "How many returns were there for each reason?"
+  oracle_sql: "SELECT reason, COUNT(*) AS n FROM returns GROUP BY reason ORDER BY reason"
+  chart: bar
+
+- id: cross_revenue_excluding_returns
+  question: "What is the total revenue from orders that were not returned?"
+  oracle_sql: |
+    SELECT ROUND(SUM(o.quantity * o.unit_price), 2) AS v
+    FROM orders o
+    WHERE o.order_id NOT IN (SELECT order_id FROM returns)
+
+- id: cross_vip_revenue
+  question: "How much revenue came from VIP customers?"
+  oracle_sql: |
+    SELECT ROUND(SUM(o.quantity * o.unit_price), 2) AS v
+    FROM orders o JOIN customers c ON c.customer_id = o.customer_id
+    WHERE c.segment = 'VIP'
+
+- id: cross_orders_per_category
+  question: "How many orders were placed for each product category?"
+  oracle_sql: |
+    SELECT p.category, COUNT(*) AS n
+    FROM orders o JOIN products p ON p.product_id = o.product_id
+    GROUP BY p.category ORDER BY p.category
+  chart: bar
+
+- id: cross_avg_cost_by_category
+  question: "What is the average cost price by product category?"
+  oracle_sql: |
+    SELECT category, ROUND(AVG(cost_price), 2) AS avg_cost
+    FROM products GROUP BY category ORDER BY category
+  chart: bar
+
+# ---- trends over time ----
+- id: trend_monthly_revenue
+  question: "Show total revenue by month."
+  oracle_sql: |
+    SELECT DATE_TRUNC('month', order_date) AS month,
+           ROUND(SUM(quantity * unit_price), 2) AS revenue
+    FROM orders GROUP BY 1 ORDER BY 1
+  chart: line
+
+- id: trend_monthly_orders
+  question: "How many orders were placed each month?"
+  oracle_sql: |
+    SELECT DATE_TRUNC('month', order_date) AS month, COUNT(*) AS n
+    FROM orders GROUP BY 1 ORDER BY 1
+  chart: line
+
+- id: trend_yearly_revenue
+  question: "What is the total revenue for each year?"
+  oracle_sql: |
+    SELECT EXTRACT(year FROM order_date) AS yr,
+           ROUND(SUM(quantity * unit_price), 2) AS revenue
+    FROM orders GROUP BY 1 ORDER BY 1
+
+- id: trend_returns_monthly
+  question: "How many returns happened each month?"
+  oracle_sql: |
+    SELECT DATE_TRUNC('month', return_date) AS month, COUNT(*) AS n
+    FROM returns GROUP BY 1 ORDER BY 1
+  chart: line
+
+# ---- top-N ----
+- id: top5_orders_by_value
+  question: "What are the five highest order values? Show the order id and the value."
+  oracle_sql: |
+    SELECT order_id, ROUND(quantity * unit_price, 2) AS value
+    FROM orders ORDER BY value DESC LIMIT 5
+
+- id: top3_products_by_revenue
+  question: "Which three products generated the most revenue? Show product id and revenue."
+  oracle_sql: |
+    SELECT o.product_id, ROUND(SUM(o.quantity * o.unit_price), 2) AS revenue
+    FROM orders o GROUP BY o.product_id ORDER BY revenue DESC LIMIT 3
+
+# ---- refusals ----
+- id: refuse_ceo
+  question: "Who is the company CEO?"
+  expect: {type: refusal}
+
+- id: refuse_salary
+  question: "What is the average employee salary?"
+  expect: {type: refusal}
+
+- id: refuse_weather
+  question: "What was the weather on the day of the biggest order?"
+  expect: {type: refusal}
+
+- id: refuse_supplier
+  question: "Which supplier delivered the most products?"
+  expect: {type: refusal}
+
+- id: refuse_marketing_spend
+  question: "How much did we spend on marketing last quarter?"
+  expect: {type: refusal}
+
+- id: refuse_competitor
+  question: "How do our prices compare to our competitors?"
+  expect: {type: refusal}
