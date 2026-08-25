@@ -236,7 +236,7 @@ Stated before the panel finds them:
    namespace and overlap by coincidence.
 4. **The model can write a valid query that answers the wrong question.** The guard proves the
    query is *safe*, not that it is *right*. The eval set is the only defence, and it covers
-   42 questions, not every question.
+   43 questions, not every question.
 5. **Free-tier latency is variable** — usually 2–4s, occasionally 20s+ under load.
 6. **Excel files with multiple sheets** load only the first sheet.
 7. **The model occasionally refuses a question it can answer** - roughly 1 run in 50,

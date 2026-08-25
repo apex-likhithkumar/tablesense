@@ -244,7 +244,7 @@ core/
   runlog.py             per-question record
   answer.py             orchestration + bounded repair loop
 data/make_samples.py    deterministic sample data (fixed seed)
-evals/golden.yaml       42 questions with hand-written oracle SQL
+evals/golden.yaml       43 questions with hand-written oracle SQL
 evals/run_evals.py      scores them, prints a pass rate
 tests/                  38 unit tests
 ```
