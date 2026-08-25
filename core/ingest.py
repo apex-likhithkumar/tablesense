@@ -10,6 +10,7 @@ from pathlib import Path
 
 import duckdb
 import pandas as pd
+from pandas.api import types as ptypes
 
 CSV_SUFFIXES = {".csv", ".txt", ".tsv"}
 EXCEL_SUFFIXES = {".xlsx", ".xls"}
@@ -26,6 +27,44 @@ class LoadedTable:
 class LoadFailure:
     source_filename: str
     error: str
+
+
+# Only ISO-style dates are coerced. Ambiguous formats like 03/04/2026 are left as
+# text on purpose - guessing day-first vs month-first silently corrupts every
+# date filter, and a wrong date is worse than an unparsed one.
+ISO_DATE = re.compile(r"^\d{4}[-/]\d{1,2}[-/]\d{1,2}")
+
+
+def coerce_date_columns(frame: pd.DataFrame) -> pd.DataFrame:
+    """Turn ISO date strings into real dates.
+
+    pandas reads CSV dates as text, which leaves DATE_TRUNC and every date
+    comparison broken downstream.
+    """
+    for column in frame.columns:
+        series = frame[column]
+        # pandas 3 gives text columns a `str` dtype rather than `object`, so test
+        # for what a column is not, rather than for one specific text dtype.
+        if (
+            ptypes.is_numeric_dtype(series)
+            or ptypes.is_datetime64_any_dtype(series)
+            or ptypes.is_bool_dtype(series)
+        ):
+            continue
+
+        present = series.dropna()
+        if present.empty:
+            continue
+
+        sample = present.astype(str).head(200)
+        if not sample.str.match(ISO_DATE).all():
+            continue
+
+        converted = pd.to_datetime(frame[column], errors="coerce")
+        if converted.notna().sum() >= len(present) * 0.95:
+            frame[column] = converted
+
+    return frame
 
 
 def table_name_from(filename: str) -> str:
@@ -60,6 +99,8 @@ def load_files(con: duckdb.DuckDBPyConnection, files) -> tuple[list[LoadedTable]
             else:
                 failed.append(LoadFailure(file.name, f"Unsupported file type '{suffix}'."))
                 continue
+
+            frame = coerce_date_columns(frame)
 
             if frame.empty:
                 failed.append(LoadFailure(file.name, "File has no rows."))
