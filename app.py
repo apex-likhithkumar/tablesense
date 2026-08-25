@@ -6,10 +6,11 @@ This file renders and holds session state. All logic lives in core/.
 import os
 
 import duckdb
+import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-st.set_page_config(page_title="Tablesense", page_icon="🧮", layout="wide")
+st.set_page_config(page_title="Tablesense", page_icon="\U0001F9EE", layout="wide")
 
 # Streamlit Cloud injects secrets rather than a .env file.
 try:
@@ -27,8 +28,20 @@ EXAMPLES = [
     "What is the total revenue across all orders?",
     "Which product category earned the most revenue from repeat customers?",
     "Show total revenue by month.",
-    "Which city generated the most revenue?",
+    "How many customers are in each city?",
 ]
+
+# The chat input is docked to the bottom of the viewport, so the page needs
+# room underneath it or the newest answer renders behind the input bar.
+st.markdown(
+    """
+    <style>
+      .block-container { padding-bottom: 7rem; }
+      div[data-testid="stMetricValue"] { font-size: 2.1rem; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 
 def get_connection() -> duckdb.DuckDBPyConnection:
@@ -58,6 +71,25 @@ def ingest(uploaded) -> None:
     st.session_state.history = []
 
 
+def format_scalar(value) -> str:
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return f"{value:,.2f}".rstrip("0").rstrip(".") if isinstance(value, float) else f"{value:,}"
+    return str(value)
+
+
+def render_result(frame: pd.DataFrame) -> None:
+    """A single number is an answer, not a table. Anything else is a table."""
+    if frame is None or frame.empty:
+        return
+
+    if frame.shape == (1, 1):
+        label = str(frame.columns[0]).replace("_", " ").strip().title()
+        st.metric(label, format_scalar(frame.iloc[0, 0]))
+        return
+
+    st.dataframe(frame, hide_index=True, use_container_width=len(frame.columns) > 2)
+
+
 def render_chart(frame, spec) -> None:
     figure = (
         px.bar(frame, x=spec.x, y=spec.y)
@@ -76,7 +108,8 @@ def render_run_details(record) -> None:
     with st.expander(label):
         rows = record.row_count if record.row_count is not None else "-"
         st.caption(
-            f"planning {record.plan_ms} ms | query {record.query_ms} ms | rows returned {rows}"
+            f"planning {record.plan_ms} ms | query {record.query_ms} ms | "
+            f"rows returned {rows} | model {settings.model_name}"
         )
         for attempt in record.attempts:
             st.markdown(f"**Attempt {attempt.number} - {attempt.outcome}**")
@@ -86,19 +119,34 @@ def render_run_details(record) -> None:
                 st.caption(attempt.error)
 
 
-def render_exchange(entry) -> None:
-    with st.chat_message("user"):
-        st.write(entry["question"])
-    with st.chat_message("assistant"):
-        st.write(entry["headline"])
-        if entry["frame"] is not None and not entry["frame"].empty:
-            st.dataframe(entry["frame"], use_container_width=True, hide_index=True)
-        if entry["chart"] is not None:
-            render_chart(entry["frame"], entry["chart"])
-        if entry["record"].final_sql:
-            with st.expander("SQL that produced this"):
-                st.code(entry["record"].final_sql, language="sql")
-        render_run_details(entry["record"])
+def render_exchange(entry, number: int, total: int) -> None:
+    record = entry["record"]
+    is_latest = number == total
+
+    heading = f"#{number}" + ("  ·  latest" if is_latest else "")
+    st.caption(heading)
+    st.markdown(f"### {entry['question']}")
+
+    if record.status == "refused":
+        st.warning(entry["headline"])
+    elif record.status == "failed":
+        st.error(entry["headline"])
+    elif record.status == "empty":
+        st.info(entry["headline"])
+    else:
+        st.caption(entry["headline"])
+
+    render_result(entry["frame"])
+
+    if entry["chart"] is not None:
+        render_chart(entry["frame"], entry["chart"])
+
+    if record.final_sql:
+        with st.expander("SQL that produced this"):
+            st.code(record.final_sql, language="sql")
+
+    render_run_details(record)
+    st.divider()
 
 
 def ask(question: str) -> None:
@@ -111,11 +159,11 @@ def ask(question: str) -> None:
     record = answer.record
 
     if record.status == "answered":
-        headline = f"{record.row_count:,} row(s) in {record.total_ms} ms"
+        headline = f"{record.row_count:,} row(s) in {record.total_ms:,} ms"
     elif record.status == "empty":
         headline = record.message
     elif record.status == "refused":
-        headline = f"I can't answer that from this data. {record.message}"
+        headline = f"Can't answer that from this data. {record.message}"
     else:
         headline = record.message or "Something went wrong."
 
@@ -150,6 +198,13 @@ if st.session_state.get("tables"):
     st.sidebar.markdown("**Loaded tables**")
     for table in st.session_state.tables:
         st.sidebar.caption(f"`{table.name}` - {table.rows:,} rows | {table.source_filename}")
+
+    if st.session_state.get("history"):
+        st.sidebar.divider()
+        if st.sidebar.button("Clear questions", use_container_width=True):
+            st.session_state.history = []
+            st.rerun()
+
     st.sidebar.divider()
     st.sidebar.caption(f"Model: `{settings.model_name}`")
 
@@ -170,45 +225,57 @@ with st.expander("What was loaded", expanded=not st.session_state.get("history")
     for profile in st.session_state.profiles:
         st.markdown(f"**`{profile.name}`** - {profile.rows:,} rows, {len(profile.columns)} columns")
         st.dataframe(
-            [
-                {
-                    "column": c.name,
-                    "type": c.dtype,
-                    "distinct": c.distinct,
-                    "null %": c.null_pct,
-                    "examples": ", ".join(c.samples[:3]),
-                }
-                for c in profile.columns
-            ],
+            pd.DataFrame(
+                [
+                    {
+                        "column": c.name,
+                        "type": c.dtype,
+                        "distinct": c.distinct,
+                        "null %": c.null_pct,
+                        "examples": ", ".join(c.samples[:3]),
+                    }
+                    for c in profile.columns
+                ]
+            ),
             use_container_width=True,
             hide_index=True,
         )
 
     if st.session_state.joins:
-        st.markdown("**Detected relationships**")
+        st.markdown("**Detected relationships** - found automatically, verified by value overlap")
         for join in st.session_state.joins:
             st.caption(
                 f"`{join.left_table}.{join.left_column}` = "
-                f"`{join.right_table}.{join.right_column}` - {join.overlap:.0%} value overlap"
+                f"`{join.right_table}.{join.right_column}` - {join.overlap:.0%} overlap"
             )
 
+# One place decides what to ask, so there is a single rerun path.
+pending: str | None = None
+
 if not st.session_state.get("history"):
-    st.markdown("**Try one of these**")
-    columns = st.columns(len(EXAMPLES))
-    for column, example in zip(columns, EXAMPLES):
-        if column.button(example, use_container_width=True):
-            with st.spinner("Writing the query..."):
-                ask(example)
-            st.rerun()
+    st.markdown("##### Try one of these")
+    for row_start in (0, 2):
+        left, right = st.columns(2)
+        for column, example in zip((left, right), EXAMPLES[row_start : row_start + 2]):
+            if column.button(example, use_container_width=True):
+                pending = example
 
-st.divider()
+typed = st.chat_input("Ask a question about your data")
+if typed:
+    pending = typed
 
-for entry in st.session_state.get("history", []):
-    render_exchange(entry)
-
-question = st.chat_input("Ask a question about your data")
-
-if question:
-    with st.spinner("Writing the query..."):
-        ask(question)
+if pending:
+    with st.status(f"{pending}", expanded=True) as status:
+        st.write("Writing the query...")
+        ask(pending)
+        status.update(label="Done", state="complete", expanded=False)
     st.rerun()
+
+# Newest first: the answer you just asked for is at the top of the page, so the
+# docked input never hides it and there is nothing to scroll to.
+history = st.session_state.get("history", [])
+if history:
+    st.divider()
+    total = len(history)
+    for offset, entry in enumerate(reversed(history)):
+        render_exchange(entry, number=total - offset, total=total)
