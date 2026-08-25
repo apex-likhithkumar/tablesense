@@ -7,3 +7,4 @@ __pycache__/
 *.egg-info/
 evals_full.txt
 evals_rerun.txt
+DEFENSE.md
