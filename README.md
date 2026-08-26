@@ -58,6 +58,56 @@ The model provider is swappable in one line — `groq_base_url` and `model_name`
 
 ---
 
+## How it works
+
+```
+                      ┌───────────────┐
+      CSV / XLSX ───► │   ingest.py   │  files become DuckDB tables
+                      └───────┬───────┘  ISO dates coerced, failures isolated
+                              │
+                      ┌───────▼───────┐
+                      │  profile.py   │  columns, types, samples
+                      └───────┬───────┘  + join keys VERIFIED by value overlap
+                              │
+                         schema text          ◄── the model never sees a data row
+                              │
+  ┌────────────┐      ┌───────▼───────┐
+  │  question  │─────►│  planner.py   │  the only LLM call
+  └────────────┘      │  gpt-oss-120b │  returns a typed QueryPlan
+                      └───────┬───────┘
+                              │ SQL
+                      ┌───────▼───────┐
+                      │   guard.py    │  parsed with sqlglot
+                      │   sqlglot     │  SELECT-only, known tables, LIMIT injected
+                      └───────┬───────┘
+                     rejected │ valid
+                     ◄────────┤
+              (error fed back)│
+              max 2 repairs   │
+                      ┌───────▼───────┐
+                      │  executor.py  │  10s watchdog timeout
+                      │    DuckDB     │  ◄── every number is computed here
+                      └───────┬───────┘
+                              │ rows
+                    ┌─────────┴─────────┐
+                    ▼                   ▼
+              ┌───────────┐      ┌─────────────┐
+              │ charts.py │      │  runlog.py  │
+              │ bar/line/ │      │ SQL, timings│
+              │   none    │      │  attempts   │
+              └─────┬─────┘      └──────┬──────┘
+                    │                   │
+                    └─────────┬─────────┘
+                              ▼
+                    answer + chart + the SQL, shown
+```
+
+**Three exits, none of which invent a number:** the model refuses when the schema
+can't answer the question · the guard rejects after two repair attempts · the query
+returns no rows.
+
+---
+
 ## Delta on top of the LLM
 
 The brief's fourth criterion is a single undefined sentence. This is my reading of it:
@@ -108,9 +158,20 @@ The model's output is an input to a decision, not the decision.
 ### 5. It refuses
 
 Three exits, none of which invent a number:
-- the model marks the question unanswerable and names the column it would have needed
-- the guard rejects the SQL twice after repair attempts
-- the query returns zero rows — reported as *"No rows matched"*, explicitly not *"the total is 0"*
+
+| Situation | What happens |
+|---|---|
+| The schema can't answer it | Refused, naming the column or table it would have needed |
+| A value doesn't exist in the data | Refused *before any SQL runs* — sample values are in the schema, so the model knows `Central` isn't one of the four regions |
+| The guard rejects the SQL twice | Refused rather than a third guess |
+| A list query matches nothing | *"No rows matched that question."* — not an empty table pretending to be an answer |
+
+An aggregate over nothing is a different case and is answered honestly: *"how many
+orders in 1998"* returns **0**, because zero is the correct answer, not a missing one.
+
+Destructive requests are refused at the planner before the guard ever sees them — ask
+it to *"delete all rows"* and it replies that the request cannot be fulfilled with a
+`SELECT`. The guard is the second line, not the first.
 
 ### 6. Everything is logged, and correctness is measured
 
